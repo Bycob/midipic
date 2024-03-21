@@ -4,6 +4,7 @@ import sys
 import os
 import argparse
 import logging
+import traceback
 
 from mido import MidiFile, MidiTrack, Message, MetaMessage, bpm2tempo
 import numpy as np
@@ -112,7 +113,16 @@ def main():
 
     # Process files
     for fname in paths:
-        midi = MidiFile(fname)
+        try:
+            midi = MidiFile(fname)
+        except Exception as e:
+            if isinstance(e, KeyboardInterrupt):
+                raise
+            else:
+                logging.warn("Skipping file %s: file could not be read" % fname)
+                traceback.print_exc()
+                continue
+
         name = os.path.splitext(os.path.basename(fname))[0]
 
         # Filtering
@@ -169,20 +179,29 @@ def midi_to_dataset(midi, name, offset, time_factor, args):
             out_img_name = os.path.join(
                 args.output_dir, name + "_offset%d_%d.png" % (offset, i)
             )
-            cv.imwrite(out_img_name, img)
-            logging.info("Wrote image file %s" % out_img_name)
 
-            if args.test_convert_back and i == 0 and offset == 0:
-                converted_midi = img_to_midi(
-                    img,
-                    time_factor,
-                    args.pixel_per_beat,
-                    args.min_pitch,
-                    args.max_pitch,
+            notes_size = (args.max_pitch - args.min_pitch) * 2
+            if np.max(img[:notes_size]) == 0:
+                logging.warn(
+                    "Discarding image %s because it has no notes" % out_img_name
                 )
-                out_midi_name = os.path.join(args.output_dir, name + "_converted.mid")
-                converted_midi.save(out_midi_name)
-                logging.info("Wrote midi file %s" % out_midi_name)
+            else:
+                cv.imwrite(out_img_name, img)
+                logging.info("Wrote image file %s" % out_img_name)
+
+                if args.test_convert_back and i == 0 and offset == 0:
+                    converted_midi = img_to_midi(
+                        img,
+                        time_factor,
+                        args.pixel_per_beat,
+                        args.min_pitch,
+                        args.max_pitch,
+                    )
+                    out_midi_name = os.path.join(
+                        args.output_dir, name + "_converted.mid"
+                    )
+                    converted_midi.save(out_midi_name)
+                    logging.info("Wrote midi file %s" % out_midi_name)
 
         i += 1
 
