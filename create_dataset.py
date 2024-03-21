@@ -62,6 +62,24 @@ def main():
         action="store_true",
         help="Convert back some of the image to test that the conversion yields correct results",
     )
+    # Filtering options
+    parser.add_argument(
+        "--instruments",
+        nargs="+",
+        type=int,
+        help="""
+        If specified, filter out any instrument that is not on this list.
+        If a track has no instrument, it's not filtered out.
+
+        For correspondance between IDs and instruments, you can refer to
+        the General MIDI instruments list, for example:
+        https://en.wikipedia.org/wiki/General_MIDI""",
+    )
+    parser.add_argument(
+        "--max_tracks",
+        type=int,
+        help="Maximum number of tracks allowed. Any file that contains more tracks will be discarded.",
+    )
 
     args = parser.parse_args()
 
@@ -71,9 +89,38 @@ def main():
     # not included
     args.max_pitch = args.max_pitch + 1
 
+    if args.instruments:
+        logging.warning(
+            "Filtering of instruments is actually not supported at the moment. The option will be added in the future."
+        )
+
+    if not args.max_tracks or args.max_tracks > 1:
+        logging.warning(
+            "This software can not currently handle more than one track. Only the first track will be exported."
+        )
+
+    # Collect file paths
+    paths = []
     for fname in args.files:
+        if os.path.isdir(fname):
+            logging.info("Adding all midi files in directory %s" % (fname))
+            for fname2 in os.listdir(fname):
+                if fname2.endswith(".mid") and not os.path.isdir(fname2):
+                    paths.append(os.path.join(fname, fname2))
+        else:
+            paths.append(fname)
+
+    # Process files
+    for fname in paths:
         midi = MidiFile(fname)
         name = os.path.splitext(os.path.basename(fname))[0]
+
+        # Filtering
+        if len(midi.tracks) > args.max_tracks:
+            logging.info(
+                "Skipping file %s because it has %d track(s) which is more than %d track(s)"
+                % (fname, len(midi.tracks), args.max_tracks)
+            )
 
         time_factor = (
             midi.ticks_per_beat / args.pixel_per_beat
@@ -242,7 +289,9 @@ def get_x_and_off(start, end):
     return start_x, start_off, end_x, end_off
 
 
-def img_to_midi(img, time_factor, pixel_per_beat, min_pitch, max_pitch, bpm=120, tolerance=3):
+def img_to_midi(
+    img, time_factor, pixel_per_beat, min_pitch, max_pitch, bpm=120, tolerance=3
+):
     """
     tolerance: Normally, a single note is encoded as a set of 3 values that
     remain constant over the span of the note. This can be used to detect note
