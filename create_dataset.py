@@ -111,6 +111,15 @@ def main():
         else:
             paths.append(fname)
 
+    # tqdm
+    if not args.verbose:
+        try:
+            import tqdm
+
+            paths = tqdm.tqdm(paths)
+        except ImportError:
+            logging.warning("tqdm not supported")
+
     # Process files
     for fname in paths:
         try:
@@ -126,16 +135,26 @@ def main():
         name = os.path.splitext(os.path.basename(fname))[0]
 
         # Filtering
-        if len(midi.tracks) > args.max_tracks:
+        if args.max_tracks and len(midi.tracks) > args.max_tracks:
             logging.info(
                 "Skipping file %s because it has %d track(s) which is more than %d track(s)"
                 % (fname, len(midi.tracks), args.max_tracks)
             )
+            continue
+
+        if len(midi.tracks) == 0:
+            logging.info("Skipping file %s because it has no tracks" % fname)
+            continue
 
         time_factor = (
             midi.ticks_per_beat / args.pixel_per_beat
         )  # each pixel is time_factor long - ticks per pixel
         logging.info("file: %s - time_factor=%d" % (fname, time_factor))
+
+        # Negative time factor (it did happen!)
+        if time_factor <= 0:
+            logging.error("Negative time factor, skipping %s" % fname)
+            continue
 
         for i in range(args.overlap_count):
             offset = i * (args.img_width / args.overlap_count)
@@ -158,7 +177,10 @@ def midi_to_dataset(midi, name, offset, time_factor, args):
         msg_offset = -time_factor * offset
 
         while msg_offset < 0:
-            msg = next(midi_it)
+            try:
+                msg = next(midi_it)
+            except StopIteration:
+                break
             msg_offset += msg.dict()["time"]
 
     while True:
@@ -182,12 +204,15 @@ def midi_to_dataset(midi, name, offset, time_factor, args):
 
             notes_size = (args.max_pitch - args.min_pitch) * 2
             if np.max(img[:notes_size]) == 0:
-                logging.warn(
+                logging.info(
                     "Discarding image %s because it has no notes" % out_img_name
                 )
             else:
-                cv.imwrite(out_img_name, img)
-                logging.info("Wrote image file %s" % out_img_name)
+                if cv.imwrite(out_img_name, img):
+                    logging.info("Wrote image file %s" % out_img_name)
+                else:
+                    logging.error("Could not write image %s" % out_img_name)
+                    raise ValueError("Could not write image %s" % out_img_name)
 
                 if args.test_convert_back and i == 0 and offset == 0:
                     converted_midi = img_to_midi(
